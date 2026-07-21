@@ -1,28 +1,66 @@
 #!/usr/bin/expect -f
 
-# Claude's slash commands require an interactive terminal. This script creates
-# a short-lived PTY, opens /usage, leaves after the screen has loaded, and exits.
-set timeout 25
+# Claude's slash commands require an interactive terminal. This helper creates
+# one short-lived PTY, captures /usage in screen-reader mode, and always tears
+# down the child before it exits.
+set timeout 20
+match_max 100000
+
+if {$argc < 1 || $argc > 2} {
+    puts stderr "Usage: claude-usage.exp /path/to/claude ?child-pid-file?"
+    exit 64
+}
+
 set claude_executable [lindex $argv 0]
+set child_pid_file [lindex $argv 1]
+if {![file executable $claude_executable]} {
+    puts stderr "Claude executable is missing or not executable"
+    exit 66
+}
 
-spawn -noecho $claude_executable --safe-mode --ax-screen-reader
+set child_running 0
 
-proc abort_child {message code} {
-    global spawn_id
-    puts stderr $message
+proc stop_child {} {
+    global child_running spawn_id
+    if {!$child_running} {
+        return
+    }
+
+    # Mark it stopped before entering the event loop so signal cleanup cannot
+    # recursively try to reap the same process.
+    set child_running 0
     catch {send -i $spawn_id -- "\003"}
     after 250
     catch {close -i $spawn_id}
     catch {wait -i $spawn_id}
+}
+
+proc abort_child {message code} {
+    puts stderr $message
+    stop_child
     exit $code
 }
 
+trap {abort_child "Claude usage helper was interrupted" 130} {SIGINT SIGTERM SIGHUP}
+
+spawn -noecho $claude_executable --safe-mode --ax-screen-reader
+set child_running 1
+if {$child_pid_file ne ""} {
+    if {[catch {open $child_pid_file w} pid_channel]} {
+        abort_child "Could not write Claude child-process record" 70
+    }
+    puts -nonewline $pid_channel [exp_pid -i $spawn_id]
+    close $pid_channel
+}
+
 expect {
-    -re {[$❯]} {}
+    -re {[\r\n][$❯]} {}
     timeout {
         abort_child "Timed out waiting for Claude Code to start" 2
     }
     eof {
+        set child_running 0
+        catch {wait -i $spawn_id}
         puts stderr "Claude Code exited before showing its prompt"
         exit 2
     }
@@ -35,6 +73,8 @@ expect {
         abort_child "Timed out waiting for Claude usage data" 3
     }
     eof {
+        set child_running 0
+        catch {wait -i $spawn_id}
         puts stderr "Claude Code exited before /usage loaded"
         exit 3
     }
@@ -44,23 +84,37 @@ expect {
     timeout {
         abort_child "Timed out waiting for Fable usage" 3
     }
+    eof {
+        set child_running 0
+        catch {wait -i $spawn_id}
+        puts stderr "Claude Code exited before Fable usage loaded"
+        exit 3
+    }
 }
+
+# Escape closes the usage screen cleanly before /exit ends the empty session.
 after 300
 send -- "\033"
 expect {
-    -re {[$❯]} {}
+    -re {[\r\n][$❯]} {}
     timeout {
         abort_child "Timed out returning from Claude usage" 4
     }
     eof {
+        set child_running 0
+        catch {wait -i $spawn_id}
+        puts stderr "Claude Code exited while closing /usage"
         exit 4
     }
 }
+
 after 150
 send -- "/exit\r"
-
 expect {
-    eof {}
+    eof {
+        set child_running 0
+        catch {wait -i $spawn_id}
+    }
     timeout {
         abort_child "Timed out waiting for Claude Code to exit" 4
     }

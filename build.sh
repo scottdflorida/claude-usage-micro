@@ -9,20 +9,30 @@ staging_app="$staging_root/$app_name.app"
 contents_dir="$staging_app/Contents"
 binary_dir="$contents_dir/MacOS"
 resources_dir="$contents_dir/Resources"
+module_cache="$project_dir/build/ModuleCache"
+source_files=("$project_dir"/Sources/**/*.swift(N))
 
 trap 'rm -rf "$staging_root"' EXIT
 
-mkdir -p "$binary_dir" "$resources_dir" "$project_dir/build/ModuleCache"
+if (( ${#source_files} == 0 )); then
+  echo "No Swift sources found" >&2
+  exit 1
+fi
 
-swiftc \
+plutil -lint "$project_dir/Info.plist" >/dev/null
+mkdir -p "$binary_dir" "$resources_dir" "$module_cache"
+
+xcrun swiftc \
   -O \
   -parse-as-library \
+  -swift-version 6 \
+  -strict-concurrency=complete \
+  -warnings-as-errors \
   -target arm64-apple-macosx13.0 \
-  -module-cache-path "$project_dir/build/ModuleCache" \
+  -module-cache-path "$module_cache" \
   -framework AppKit \
   -framework Foundation \
-  "$project_dir/Sources/ClaudeUsageMicro.swift" \
-  "$project_dir/Sources/RefreshConfiguration.swift" \
+  "${source_files[@]}" \
   -o "$binary_dir/ClaudeUsageMicro"
 
 cp "$project_dir/Info.plist" "$contents_dir/Info.plist"
