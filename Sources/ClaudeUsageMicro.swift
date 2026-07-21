@@ -725,10 +725,19 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDeleg
     private func updateStatusItem(report: UsageReport) {
         guard report.limits.indices.contains(ProviderConfig.statusLimitIndex) else { return }
         let snapshot = report.limits[ProviderConfig.statusLimitIndex]
-        let week = Int((snapshot.weekRemaining() * 100).rounded())
         let usage = snapshot.usageRemainingPercent
         statusItem.button?.title = "\(ProviderConfig.menuPrefix) \(usage)%"
-        statusItem.button?.toolTip = "Week remaining: \(week)% · Usage remaining: \(usage)%"
+        guard report.limits.count >= 3 else { return }
+        let session = report.limits[0]
+        let allModels = report.limits[1]
+        let fable = report.limits[2]
+        let sessionTime = Int((session.weekRemaining() * 100).rounded())
+        let weeklyTime = Int((allModels.weekRemaining() * 100).rounded())
+        statusItem.button?.toolTip = [
+            "Session · Usage left \(session.usageRemainingPercent)% · Time left \(sessionTime)%",
+            "All models · Usage left \(allModels.usageRemainingPercent)% · Week left \(weeklyTime)%",
+            "Fable · Usage left \(fable.usageRemainingPercent)% · Week left \(weeklyTime)%"
+        ].joined(separator: "\n")
     }
 
     private func startClickOutsideMonitors() {
