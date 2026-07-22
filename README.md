@@ -16,7 +16,7 @@ If a refresh fails while the last reading is still inside its limit window, the 
 
 - macOS 13 or newer
 - Apple silicon or Intel (the build targets the host architecture)
-- Xcode 16 or newer command line tools (Swift 6)
+- Xcode 26 or newer command line tools (Swift 6.2)
 - An authenticated Claude Code CLI
 - `expect` (included with macOS)
 
