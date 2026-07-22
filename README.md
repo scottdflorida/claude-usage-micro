@@ -1,22 +1,45 @@
 # Claude Usage Micro
 
-**A tiny macOS menu-bar meter for Claude Code usage.**
+## A tiny macOS menu-bar meter for Claude Code usage.
 
-See current-session, weekly all-model, and weekly Fable usage without keeping a terminal open.
+- No API key or separate login required
+- No third-party dependencies
+- I have a job watching Claude Code's release notes so I can update when Anthropic changes how usage data is exposed
 
-The colored bars show **usage remaining**. The markers show **time remaining** in each limit window. Green means usage is ahead of the clock, orange means it is behind, and red means less than 15% remains.
+***Get the companion meters for [Cursor/Grok](https://github.com/scottdflorida/cursor-usage-micro) and
+[Codex](https://github.com/scottdflorida/codex-usage-micro)!*** *(So you can always see which services still have
+usage remaining.)*
 
-The menu-bar item permanently stacks the `Claude` name above its usage gauge. Open the popover and use the gear in its upper-left corner to choose whether the gauge follows the current session, weekly all-model, or weekly Fable limit. The default is the weekly all-model gauge; no numeric percentage is shown in the menu bar.
+<!-- Add the companion meters screenshot here. -->
 
-Each limit is validated independently. If Claude temporarily omits or changes one row, the limits that can still be read remain live and the affected row is marked unavailable. The terminal helper does not depend on model names or headings; known heading, percentage, and reset-time variations are isolated in the tested Swift parser.
+The purpose is to show you **how your usage is draining compared to the time left in each limit window**.
+The vertical marker inside the meter moves from right to left as the window progresses. The fill drains as usage
+is consumed.
 
-If a refresh fails while the last reading is still inside its limit window, the app keeps showing that reading and adds a small orange `S` (stale) badge next to the brand name; the tooltip and popover explain what went wrong. Definitive states — Claude Code not installed, or the helper missing — clear the reading instead.
+- Green when remaining usage exceeds remaining time
+- Amber when remaining usage is less than remaining time
+- Red when remaining usage is less than 15%
+
+Claude reports current-session, weekly all-model, and weekly Fable limits. Open the popover and use the gear to
+choose which limit appears in the menu bar; weekly all-model usage is the default.
+
+In the menu bar: meter at a glance
+
+<!-- Add the menu-bar screenshot here. -->
+
+On hover: the data that matters
+
+<!-- Add the tooltip screenshot here. -->
+
+On click: the full view
+
+<!-- Add the popover screenshot here. -->
 
 ## Requirements
 
 - macOS 13 or newer
-- Apple silicon or Intel (the build targets the host architecture)
-- Xcode 26 or newer command line tools (Swift 6.2)
+- Apple silicon or Intel; the build targets the host architecture
+- A Swift 6.2-capable Xcode toolchain (Xcode 26 or newer)
 - An authenticated Claude Code CLI
 - `expect` (included with macOS)
 
@@ -29,40 +52,50 @@ cd claude-usage-micro
 open "build/Claude Usage Micro.app"
 ```
 
-No API key, server, database, package manager, or external dependency is required. Every 15 minutes, the app starts a short-lived local Claude Code session in safe mode, reads `/usage` through a pseudo-terminal, and exits. It sends no telemetry of its own.
+No API key, hosted service, app-owned database, package manager, or third-party dependency is required. Every
+15 minutes, the app starts a short-lived Claude Code session in safe mode, reads `/usage` through a pseudo-terminal,
+and exits.
+It sends no telemetry of its own.
 
-To change the automatic refresh cadence, edit [`Sources/RefreshConfiguration.swift`](Sources/RefreshConfiguration.swift) and rebuild.
+To change the automatic refresh cadence, edit [`Sources/RefreshConfiguration.swift`](Sources/RefreshConfiguration.swift)
+and rebuild.
 
 ## Development
 
-The app is deliberately small, but its boundaries are explicit:
-
-- The typed usage model, terminal normalization, and transcript parser (`UsageModels.swift`, `TerminalTranscript.swift`, `UsageTranscriptParser.swift`) are AppKit-free and deterministic.
-- AppKit presentation, refresh coordination, and the bounded Claude subprocess live beside them in `Sources/` (`AppDelegate.swift`, `UsageViewController.swift`, `ClaudeUsageClient.swift`).
-- `Scripts/claude-usage.exp` is the minimal PTY adapter required by Claude's interactive `/usage` command.
-
-For local integrations, run the built executable with `--snapshot`: it prints one `limit_<n>_time_remaining` / `limit_<n>_usage_remaining` / `limit_<n>_resets_at` triple per readable limit (`0` session, `1` weekly all-model, `2` weekly Fable; an unavailable limit is omitted without renumbering the others) and exits non-zero with a compact diagnostic on stderr when usage cannot be read.
-
-Run the complete local check with:
+Run the strict local checks and build with:
 
 ```sh
 ./test.sh
 ./build.sh
 ```
 
-`test.sh` runs strict `swift-format` lint, the dependency-free unit suite, and a full Swift 6 complete-concurrency type-check with warnings treated as errors. `build.sh` produces and verifies an ad-hoc-signed app bundle in `build/`. Both scripts run in CI on macOS.
+The app has no third-party dependencies and keeps terminal handling behind a small normalization boundary. The
+Expect helper recognizes enough output to capture a bounded `/usage` screen; the Swift parser owns headings,
+percentages, reset times, redraws, and domain validation. It accepts tested wording variations, preserves each valid
+limit independently, and fails closed when a response cannot be interpreted safely.
+
+Provider churn is intentionally localized: PTY interaction lives in `Scripts/claude-usage.exp`, transcript aliases
+and validation live in `UsageTranscriptParser`, and process ownership lives in `ClaudeUsageClient`. A transient
+helper, timeout, or schema failure keeps an unexpired report visible as explicitly stale. A missing Claude executable
+or bundled helper clears the reading.
+
+For local integrations, run the built executable with `--snapshot`. It prints one stable, line-oriented group per
+readable limit and exits nonzero with a compact diagnostic when usage cannot be read.
 
 ## Troubleshooting
 
-The menu-bar gauge shows `…` while loading and `!` when usage is unavailable; the tooltip carries the exact error.
-
-- **"Claude Code is not installed"** — the app looks for `claude` in `~/.local/bin`, `~/.claude/local`, `/opt/homebrew/bin`, and `/usr/local/bin`, then in every absolute `PATH` entry. Apps launched from Finder inherit a minimal `PATH`, so if `claude` lives under a version manager (nvm, volta, asdf), either symlink it — `ln -s "$(command -v claude)" ~/.local/bin/claude` — or launch the app once from a terminal with `open "build/Claude Usage Micro.app"` so your shell's `PATH` is inherited.
-- **Not signed in** — run `claude` once in a terminal and authenticate; the app never handles credentials itself.
-- Still stuck? Run `"build/Claude Usage Micro.app/Contents/MacOS/ClaudeUsageMicro" --snapshot` to print the parsed reading or the underlying diagnostic.
+- **"Claude Code is not installed"**: the app checks `~/.local/bin`, `~/.claude/local`, the Homebrew locations,
+  and every absolute `PATH` entry. If `claude` lives under a version manager, symlink it with
+  `ln -s "$(command -v claude)" ~/.local/bin/claude`, then press Refresh.
+- **Claude is not signed in**: run `claude` in a terminal and authenticate. The app never handles Claude
+  credentials itself.
+- **The gauge shows `!`**: hover over the menu-bar item for the exact diagnostic. Run
+  `"build/Claude Usage Micro.app/Contents/MacOS/ClaudeUsageMicro" --snapshot` for a direct provider check.
 
 ## Uninstall
 
-Quit from the popover and delete `build/Claude Usage Micro.app`. To remove the app's saved gauge choice and private workspace:
+Quit the app from its popover, then delete `build/Claude Usage Micro.app` or wherever you copied it. To remove the
+saved gauge choice and the private usage workspace, run:
 
 ```sh
 defaults delete com.scottflorida.claudeusagemicro
@@ -71,7 +104,11 @@ rm -rf ~/Library/Application\ Support/com.scottflorida.claudeusagemicro
 
 ## Privacy and security
 
-The app has no networking or telemetry code and does not collect or persist Claude credentials; authentication remains handled by the local CLI. It invokes Claude in safe mode, keeps at most 512 KiB of `/usage` transcript in memory, and discards it immediately after parsing. An owner-only temporary file records only the Claude child PID and is removed after cleanup. Claude Code itself may communicate with Anthropic according to its own configuration; stalled, cancelled, or overly verbose helper processes are terminated and reaped under a 100-second process deadline that dominates the helper's own stage timeouts.
+The app has no networking or telemetry code and never collects or persists Claude credentials. Authentication stays
+with the local Claude Code CLI, which may communicate with Anthropic according to its own configuration. The app runs
+Claude in safe mode from an owner-only workspace, keeps at most 512 KiB of transcript in memory, and discards it after
+parsing. A temporary owner-only file records only the child PID for cleanup. Stalled, cancelled, or overly verbose
+processes are terminated and reaped under a 100-second deadline.
 
 ## License
 
