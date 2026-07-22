@@ -23,52 +23,39 @@ struct UsageTranscriptParser: Sendable {
         let candidates = candidateSections(in: text)
         guard !candidates.isEmpty else { throw ParseError.incompleteUsageScreen }
 
-        var bestReport: UsageReport?
-        var bestWindowCount = 0
-        var mostRecentError: Error?
-
-        for sections in candidates {
-            do {
-                let report = try parse(sections, now: now)
-                let windowCount = report.availableLimits.count
-                if windowCount >= bestWindowCount {
-                    bestReport = report
-                    bestWindowCount = windowCount
-                }
-            } catch {
-                mostRecentError = error
-            }
-        }
-
-        guard let bestReport else {
-            throw mostRecentError ?? ParseError.incompleteUsageScreen
-        }
-        return bestReport
-    }
-
-    private func parse(_ sections: [UsageLimit: String], now: Date) throws -> UsageReport {
+        // The usage screen renders progressively, so no single redraw is guaranteed to
+        // contain every section. Each limit is merged independently across generations —
+        // newest successful parse wins — while every snapshot still comes from exactly
+        // one generation, so fields from different redraws are never combined.
         var snapshots: [UsageLimit: UsageSnapshot] = [:]
         var mostRecentError: Error?
 
-        for limit in [UsageLimit.session, .allModels] {
-            guard let section = sections[limit] else { continue }
-            do {
-                snapshots[limit] = try snapshot(for: limit, in: section, now: now)
-            } catch {
-                mostRecentError = error
+        for sections in candidates {
+            var candidateAllModelsReset: Date?
+            for limit in [UsageLimit.session, .allModels] {
+                guard let section = sections[limit] else { continue }
+                do {
+                    let parsed = try snapshot(for: limit, in: section, now: now)
+                    snapshots[limit] = parsed
+                    if limit == .allModels {
+                        candidateAllModelsReset = parsed.resetsAt
+                    }
+                } catch {
+                    mostRecentError = error
+                }
             }
-        }
 
-        if let section = sections[.fable] {
-            do {
-                snapshots[.fable] = try snapshot(
-                    for: .fable,
-                    in: section,
-                    fallbackReset: snapshots[.allModels]?.resetsAt,
-                    now: now
-                )
-            } catch {
-                mostRecentError = error
+            if let section = sections[.fable] {
+                do {
+                    snapshots[.fable] = try snapshot(
+                        for: .fable,
+                        in: section,
+                        fallbackReset: candidateAllModelsReset,
+                        now: now
+                    )
+                } catch {
+                    mostRecentError = error
+                }
             }
         }
 
@@ -122,8 +109,9 @@ struct UsageTranscriptParser: Sendable {
         return snapshot
     }
 
-    /// Splits terminal redraws into independent candidates before parsing fields. A partially
-    /// rendered final redraw therefore cannot overwrite a more complete earlier reading.
+    /// Splits terminal redraws into independent candidates before parsing fields. A torn
+    /// section in a later redraw fails to parse and keeps the earlier reading; a section
+    /// that parses completely is that limit's newest truth.
     private func candidateSections(in text: String) -> [[UsageLimit: String]] {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var groups: [HeadingGroup] = []

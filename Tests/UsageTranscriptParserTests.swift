@@ -80,6 +80,42 @@ func usageTranscriptParserTests() -> [TestCase] {
             try expectEqual(report.allModels?.usedPercent, 52)
             try expectEqual(report.fable?.usedPercent, 63)
         },
+        TestCase(name: "progressively rendered generations merge per limit") {
+            // Modeled on a real transcript: the first paint shows the session and
+            // all-model limits with rounded times, a cost-stats block titled just
+            // "Session", and insight percentages; the refined second paint has exact
+            // times and the Fable limit but loses the session heading to a redraw.
+            let text = """
+                you: /usage
+                Settings  Status   Config   Usage   Stats
+                Session
+                Total cost:            $0.0000
+                Usage:                 0 input, 0 output
+                Current session
+                4% 4% used
+                Resets 6pm (America/Los_Angeles)
+                Current week (all models)
+                16% 16% used
+                Resets Jul 23 at 6am (America/Los_Angeles)
+                What's contributing to your limits usage?
+                99% of your usage came from subagent-heavy sessions
+                Esc to cancelResets 5:59pm (America/Los_Angeles)
+                Current week (all models)
+                16% 16% used
+                Resets Jul 23 at 5:59am (America/Los_Angeles)
+                Current week (Fable)
+                31% 31% used
+                Resets Jul 23 at 5:59am (America/Los_Angeles)
+                """
+            let report = try parse(text)
+            try expectEqual(report.session?.usedPercent, 4)
+            try expectEqual(report.session?.resetsAt, date("2026-07-21T01:00:00Z"))
+            try expectEqual(report.allModels?.usedPercent, 16)
+            try expectEqual(report.allModels?.resetsAt, date("2026-07-23T12:59:00Z"))
+            try expectEqual(report.fable?.usedPercent, 31)
+            try expectEqual(report.fable?.resetsAt, date("2026-07-23T12:59:00Z"))
+            try expect(report.isComplete, "all three limits must survive the merge")
+        },
         TestCase(name: "capture markers exclude post-usage context") {
             let usage = transcript(session: 12, allModels: 34, fable: 56)
                 .replacingOccurrences(of: "█████ 56% used", with: "loading…")
@@ -111,7 +147,7 @@ func usageTranscriptParserTests() -> [TestCase] {
             try expectEqual(report.allModels?.usedPercent, 34)
             try expectEqual(report.fable, nil)
         },
-        TestCase(name: "partial redraw does not mix windows") {
+        TestCase(name: "a later partial redraw updates only the limits it renders") {
             let complete = transcript(session: 11, allModels: 22, fable: 33)
                 .replacingOccurrences(of: "What's contributing\nmodel breakdown", with: "")
             let text = """
@@ -125,10 +161,10 @@ func usageTranscriptParserTests() -> [TestCase] {
                 """
             let report = try parse(text)
             try expectEqual(report.session?.usedPercent, 11)
-            try expectEqual(report.allModels?.usedPercent, 22)
-            try expectEqual(report.fable?.usedPercent, 33)
+            try expectEqual(report.allModels?.usedPercent, 82)
+            try expectEqual(report.fable?.usedPercent, 83)
         },
-        TestCase(name: "renamed-session redraw does not mix windows") {
+        TestCase(name: "an unknown heading cannot relabel the session limit") {
             let complete = transcript(session: 11, allModels: 22, fable: 33)
                 .replacingOccurrences(of: "What's contributing\nmodel breakdown", with: "")
             let text = """
@@ -145,8 +181,8 @@ func usageTranscriptParserTests() -> [TestCase] {
                 """
             let report = try parse(text)
             try expectEqual(report.session?.usedPercent, 11)
-            try expectEqual(report.allModels?.usedPercent, 22)
-            try expectEqual(report.fable?.usedPercent, 33)
+            try expectEqual(report.allModels?.usedPercent, 82)
+            try expectEqual(report.fable?.usedPercent, 83)
         },
         TestCase(name: "next-day session reset") {
             let now = date("2026-07-21T04:00:00Z")  // July 20 at 9 p.m. Pacific
