@@ -13,6 +13,13 @@ resources_dir="$contents_dir/Resources"
 module_cache="$project_dir/build/ModuleCache"
 source_files=("$project_dir"/Sources/*.swift(N))
 preserve_staging=0
+target_arch=${TARGET_ARCH:-$(uname -m)}
+signing_identity=${CODE_SIGN_IDENTITY:--}
+
+if [[ "$target_arch" != "arm64" && "$target_arch" != "x86_64" ]]; then
+  print -u2 -- "Unsupported target architecture: $target_arch"
+  exit 1
+fi
 
 cleanup_staging() {
   if (( preserve_staging == 0 )); then
@@ -56,7 +63,7 @@ swiftc \
   -swift-version 6 \
   -strict-concurrency=complete \
   -warnings-as-errors \
-  -target "$(uname -m)-apple-macosx13.0" \
+  -target "$target_arch-apple-macosx13.0" \
   -module-cache-path "$module_cache" \
   -framework AppKit \
   -framework Foundation \
@@ -69,7 +76,11 @@ cp "$project_dir/Scripts/claude-usage.exp" "$resources_dir/claude-usage.exp"
 chmod +x "$resources_dir/claude-usage.exp"
 
 xattr -cr "$staging_app"
-codesign --force --sign - "$staging_app"
+if [[ "$signing_identity" == "-" ]]; then
+  codesign --force --sign - "$staging_app"
+else
+  codesign --force --sign "$signing_identity" --options runtime --timestamp "$staging_app"
+fi
 codesign --verify --deep --strict "$staging_app"
 
 # When File Provider keeps corrupting the copied bundle, fall back to a symlink into

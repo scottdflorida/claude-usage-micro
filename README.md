@@ -1,5 +1,7 @@
 # Claude Usage Micro
 
+[![CI](https://github.com/scottdflorida/claude-usage-micro/actions/workflows/ci.yml/badge.svg)](https://github.com/scottdflorida/claude-usage-micro/actions/workflows/ci.yml)
+
 ## A tiny macOS menu-bar meter for Claude Code usage.
 - No API key or separate login required
 - No third-party dependencies
@@ -10,7 +12,7 @@
 usage remaining.)*  
 <img width="470" height="37" alt="image" src="https://github.com/user-attachments/assets/99cdc56b-7ca3-4a0d-8a10-9dd10f2d9f45" /> 
 
-[Buy Me a Coffee :)](https://buymeacoffee.com/sflorida)  
+If this earns a place in your menu bar, a GitHub star helps other people find it. You can also [buy me a coffee](https://buymeacoffee.com/sflorida).
 
 The purpose is to show you **how your usage is draining compared to the time left in each limit window**.  
 The vertical marker inside the meter moves from right to left as the window progresses.  
