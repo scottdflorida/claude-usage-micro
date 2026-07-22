@@ -3,7 +3,7 @@
 ## A tiny macOS menu-bar meter for Claude Code usage.
 - No API key or separate login required
 - No third-party dependencies
-- I have a job watching Claude Code's release notes so I can update when Anthropic changes how usage data is exposed
+- I have daily release-notes watch and canary probes running so I can quickly react and update this app whenever they change how usage data is exposed
 
 ***Get the companion meters for [Cursor/Grok](https://github.com/scottdflorida/cursor-usage-micro) and
 [Codex](https://github.com/scottdflorida/codex-usage-micro)!*** *(So you can always see which services still have
