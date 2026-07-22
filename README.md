@@ -1,5 +1,7 @@
 # Claude Usage Micro
 
+[![CI](https://github.com/scottdflorida/claude-usage-micro/actions/workflows/ci.yml/badge.svg)](https://github.com/scottdflorida/claude-usage-micro/actions/workflows/ci.yml)
+
 ## A tiny macOS menu-bar meter for Claude Code usage.
 - No API key or separate login required
 - No third-party dependencies
