@@ -14,6 +14,10 @@ test_sources=(${source_files:#*/ClaudeUsageMicro.swift})
 test_sources=(${test_sources:#*/AppDelegate.swift})
 test_files=("$project_dir"/Tests/*.swift(N))
 
+for script in "$project_dir/build.sh" "$project_dir/install.sh" "$project_dir/package-release.sh"; do
+  zsh -n "$script"
+done
+
 if (( ${#source_files} == 0 || ${#test_files} == 0 )); then
   echo "Test sources are incomplete" >&2
   exit 1

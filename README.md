@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/scottdflorida/claude-usage-micro/actions/workflows/ci.yml/badge.svg)](https://github.com/scottdflorida/claude-usage-micro/actions/workflows/ci.yml)
 
+[Latest source release](https://github.com/scottdflorida/claude-usage-micro/releases/latest)
+
 ## A tiny macOS menu-bar meter for Claude Code usage.
 - No API key or separate login required
 - No third-party dependencies
@@ -42,14 +44,19 @@ On click: the full view
 - An authenticated Claude Code CLI
 - `expect` (included with macOS)
 
-## Build and run
+## Install from source
+
+Prebuilt downloads are not currently provided. The installer compiles the app on your Mac, copies it to
+`~/Applications`, and opens it.
 
 ```sh
 git clone https://github.com/scottdflorida/claude-usage-micro.git
 cd claude-usage-micro
-./build.sh
-open "build/Claude Usage Micro.app"
+./install.sh
 ```
+
+To update later, run `git pull` in the checkout and then run `./install.sh` again. Use `./install.sh --no-launch`
+when you want to install without opening the app immediately.
 
 No API key, hosted service, app-owned database, package manager, or third-party dependency is required. Every
 15 minutes, the app starts a short-lived Claude Code session in safe mode, reads `/usage` through a pseudo-terminal,
@@ -89,12 +96,13 @@ readable limit and exits nonzero with a compact diagnostic when usage cannot be 
 - **Claude is not signed in**: run `claude` in a terminal and authenticate. The app never handles Claude
   credentials itself.
 - **The gauge shows `!`**: hover over the menu-bar item for the exact diagnostic. Run
-  `"build/Claude Usage Micro.app/Contents/MacOS/ClaudeUsageMicro" --snapshot` for a direct provider check.
+  `"$HOME/Applications/Claude Usage Micro.app/Contents/MacOS/ClaudeUsageMicro" --snapshot` for a direct provider
+  check.
 
 ## Uninstall
 
-Quit the app from its popover, then delete `build/Claude Usage Micro.app` or wherever you copied it. To remove the
-saved gauge choice and the private usage workspace, run:
+Quit the app from its popover, then delete `~/Applications/Claude Usage Micro.app`. To remove the saved gauge choice
+and the private usage workspace, run:
 
 ```sh
 defaults delete com.scottflorida.claudeusagemicro
