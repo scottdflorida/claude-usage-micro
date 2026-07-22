@@ -1,21 +1,18 @@
 # Claude Usage Micro
 
 ## A tiny macOS menu-bar meter for Claude Code usage.
-
 - No API key or separate login required
 - No third-party dependencies
 - I have a job watching Claude Code's release notes so I can update when Anthropic changes how usage data is exposed
 
 ***Get the companion meters for [Cursor/Grok](https://github.com/scottdflorida/cursor-usage-micro) and
 [Codex](https://github.com/scottdflorida/codex-usage-micro)!*** *(So you can always see which services still have
-usage remaining.)*
+usage remaining.)*  
+<img width="470" height="37" alt="image" src="https://github.com/user-attachments/assets/99cdc56b-7ca3-4a0d-8a10-9dd10f2d9f45" /> 
 
-<!-- Add the companion meters screenshot here. -->
-
-The purpose is to show you **how your usage is draining compared to the time left in each limit window**.
-The vertical marker inside the meter moves from right to left as the window progresses. The fill drains as usage
-is consumed.
-
+The purpose is to show you **how your usage is draining compared to the time left in each limit window**.  
+The vertical marker inside the meter moves from right to left as the window progresses.  
+The fill drains as usage is consumed.
 - Green when remaining usage exceeds remaining time
 - Amber when remaining usage is less than remaining time
 - Red when remaining usage is less than 15%
@@ -23,17 +20,15 @@ is consumed.
 Claude reports current-session, weekly all-model, and weekly Fable limits. Open the popover and use the gear to
 choose which limit appears in the menu bar; weekly all-model usage is the default.
 
-In the menu bar: meter at a glance
+In the menu bar: meter at a glance  
+<img width="64" height="35" alt="image" src="https://github.com/user-attachments/assets/18f50630-fa42-4b98-a459-f6f87221ed40" />
 
-<!-- Add the menu-bar screenshot here. -->
+On hover: the data that matters  
+<img width="345" height="102" alt="image" src="https://github.com/user-attachments/assets/8a24772f-a7c4-43d6-b667-5f5565f45549" />
 
-On hover: the data that matters
+On click: the full view  
+<img width="358" height="368" alt="image" src="https://github.com/user-attachments/assets/832caf69-846f-4f31-a36f-0ecd276ccb07" />
 
-<!-- Add the tooltip screenshot here. -->
-
-On click: the full view
-
-<!-- Add the popover screenshot here. -->
 
 ## Requirements
 
