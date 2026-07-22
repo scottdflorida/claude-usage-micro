@@ -5,14 +5,22 @@
 # down the child before it exits.
 set timeout 20
 match_max 100000
+set prompt_pattern {[\r\n][[:space:]]*[$>❯][[:space:]]*}
+set capture_begin_marker {__CLAUDE_USAGE_MICRO_BEGIN__}
+set capture_end_marker {__CLAUDE_USAGE_MICRO_END__}
 
-if {$argc < 1 || $argc > 2} {
-    puts stderr "Usage: claude-usage.exp /path/to/claude ?child-pid-file?"
+if {$argc < 1 || $argc > 3} {
+    puts stderr "Usage: claude-usage.exp /path/to/claude ?child-pid-file? ?--trust-controlled-workspace?"
     exit 64
 }
 
 set claude_executable [lindex $argv 0]
 set child_pid_file [lindex $argv 1]
+set trust_controlled_workspace [expr {$argc == 3 && [lindex $argv 2] eq "--trust-controlled-workspace"}]
+if {$argc == 3 && !$trust_controlled_workspace} {
+    puts stderr "Unknown Claude usage helper option"
+    exit 64
+}
 if {![file executable $claude_executable]} {
     puts stderr "Claude executable is missing or not executable"
     exit 66
@@ -53,22 +61,58 @@ if {$child_pid_file ne ""} {
     close $pid_channel
 }
 
-expect {
-    -re {[\r\n][$❯]} {}
-    timeout {
-        abort_child "Timed out waiting for Claude Code to start" 2
-    }
-    eof {
-        set child_running 0
-        catch {wait -i $spawn_id}
-        puts stderr "Claude Code exited before showing its prompt"
-        exit 2
+set workspace_trust_confirmed 0
+set workspace_trust_requested 0
+while {1} {
+    expect {
+        -re $prompt_pattern {
+            break
+        }
+        -nocase -re {(permission required.*workspace|trust this (folder|workspace)|accessing workspace)} {
+            if {!$trust_controlled_workspace || $workspace_trust_confirmed} {
+                abort_child "Claude Code requested unexpected workspace trust" 2
+            }
+            set workspace_trust_requested 1
+            exp_continue
+        }
+        -nocase -re {(enter y/n|yes/no|continue\??[[:space:]]*\[?y/n\]?)} {
+            if {$workspace_trust_confirmed} {
+                exp_continue
+            }
+            if {!$workspace_trust_requested} {
+                abort_child "Claude Code requested unexpected workspace trust" 2
+            }
+            set workspace_trust_confirmed 1
+            send -- "y\r"
+            exp_continue
+        }
+        timeout {
+            abort_child "Timed out waiting for Claude Code to start" 2
+        }
+        eof {
+            set child_running 0
+            catch {wait -i $spawn_id}
+            puts stderr "Claude Code exited before showing its prompt"
+            exit 2
+        }
     }
 }
 
+# Discard any status-line redraw queued after the prompt so an unrelated
+# percentage cannot be mistaken for the response to the command below.
+set timeout 0
+expect {
+    -re {.+} {exp_continue}
+    timeout {}
+}
+set timeout 20
+puts $capture_begin_marker
+flush stdout
 send -- "/usage\r"
 expect {
-    -re {Current week \(Fable\)} {}
+    # Transport waits only for a usage-shaped value. Headings and semantic
+    # wording belong to the Swift parser, where aliases can be tested safely.
+    -re {[0-9]{1,3}[[:space:]]*%} {}
     timeout {
         abort_child "Timed out waiting for Claude usage data" 3
     }
@@ -79,24 +123,38 @@ expect {
         exit 3
     }
 }
-expect {
-    -re {[0-9]+%[[:space:]]+used} {}
-    timeout {
-        abort_child "Timed out waiting for Fable usage" 3
-    }
-    eof {
-        set child_running 0
-        catch {wait -i $spawn_id}
-        puts stderr "Claude Code exited before Fable usage loaded"
-        exit 3
+
+# Capture for a minimum settling period and until the PTY has been quiet, with
+# a hard upper bound for animated or otherwise noisy usage screens.
+set minimum_capture_deadline [expr {[clock milliseconds] + 1500}]
+set quiet_deadline [expr {[clock milliseconds] + 1000}]
+set capture_deadline [expr {[clock milliseconds] + 5000}]
+while {
+    [clock milliseconds] < $capture_deadline
+    && ([clock milliseconds] < $minimum_capture_deadline || [clock milliseconds] < $quiet_deadline)
+} {
+    set timeout 1
+    expect {
+        -re {.+} {
+            set quiet_deadline [expr {[clock milliseconds] + 1000}]
+        }
+        timeout {}
+        eof {
+            set child_running 0
+            catch {wait -i $spawn_id}
+            puts stderr "Claude Code exited before /usage finished loading"
+            exit 3
+        }
     }
 }
 
+puts $capture_end_marker
+flush stdout
+set timeout 20
 # Escape closes the usage screen cleanly before /exit ends the empty session.
-after 300
 send -- "\033"
 expect {
-    -re {[\r\n][$❯]} {}
+    -re $prompt_pattern {}
     timeout {
         abort_child "Timed out returning from Claude usage" 4
     }

@@ -2,6 +2,27 @@ import AppKit
 
 @MainActor
 final class ComparisonBarView: NSView {
+    private enum Layout {
+        static let rowHeight: CGFloat = 17
+        static let trackHeight: CGFloat = 10
+        static let labelGap: CGFloat = 2.5
+        static let markerWidth: CGFloat = 3
+    }
+
+    private enum NamePlacement {
+        case beforeValue
+        case afterValue
+
+        // ±4% hysteresis around the midpoint so the label doesn't flip sides on every tick.
+        func updated(for fraction: Double) -> Self {
+            switch (self, fraction) {
+            case (.afterValue, 0.54...): .beforeValue
+            case (.beforeValue, ...0.46): .afterValue
+            default: self
+            }
+        }
+    }
+
     private let timeName: NSTextField
     private let timeValue = NSTextField(labelWithString: "—")
     private let usageName: NSTextField
@@ -11,9 +32,11 @@ final class ComparisonBarView: NSView {
     private var usageFraction = 0.0
     private var usageColor = NSColor.systemGray
     private var trackRect = NSRect.zero
-    private var isAvailable = false
+    private var showsReading = false
+    private var timeNamePlacement = NamePlacement.afterValue
+    private var usageNamePlacement = NamePlacement.afterValue
 
-    init(timeLabel: String, usageLabel: String) {
+    init(timeLabel: String, usageLabel: String, accessibilityLabel: String) {
         timeName = NSTextField(labelWithString: timeLabel)
         usageName = NSTextField(labelWithString: usageLabel)
         super.init(frame: .zero)
@@ -35,7 +58,7 @@ final class ComparisonBarView: NSView {
 
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
-        setAccessibilityLabel("\(usageLabel) compared with \(timeLabel)")
+        setAccessibilityLabel(accessibilityLabel)
         setAccessibilityHelp("The colored bar shows usage remaining; the marker shows time remaining.")
         for label in [timeName, timeValue, usageName, usageValue] {
             label.setAccessibilityElement(false)
@@ -54,28 +77,26 @@ final class ComparisonBarView: NSView {
     override func layout() {
         super.layout()
 
-        let rowHeight: CGFloat = 17
-        let trackHeight: CGFloat = 10
         trackRect = NSRect(
             x: bounds.minX,
-            y: bounds.midY - trackHeight / 2,
+            y: bounds.midY - Layout.trackHeight / 2,
             width: bounds.width,
-            height: trackHeight
+            height: Layout.trackHeight
         )
 
-        layoutRow(
+        usageNamePlacement = layoutRow(
             name: usageName,
             value: usageValue,
             fraction: usageFraction,
-            y: bounds.maxY - rowHeight,
-            rowHeight: rowHeight
+            namePlacement: usageNamePlacement,
+            y: bounds.maxY - Layout.rowHeight
         )
-        layoutRow(
+        timeNamePlacement = layoutRow(
             name: timeName,
             value: timeValue,
             fraction: timeFraction,
-            y: bounds.minY,
-            rowHeight: rowHeight
+            namePlacement: timeNamePlacement,
+            y: bounds.minY
         )
     }
 
@@ -83,16 +104,14 @@ final class ComparisonBarView: NSView {
         super.draw(dirtyRect)
         guard trackRect.width > 0 else { return }
 
-        let radius = trackRect.height / 2
-        let trackPath = NSBezierPath(roundedRect: trackRect, xRadius: radius, yRadius: radius)
-        let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let trackColor =
-            isDark
-            ? NSColor.white.withAlphaComponent(0.24)
-            : NSColor.black.withAlphaComponent(0.14)
+        let trackPath = NSBezierPath(
+            roundedRect: trackRect,
+            xRadius: trackRect.height / 2,
+            yRadius: trackRect.height / 2
+        )
         trackColor.setFill()
         trackPath.fill()
-        guard isAvailable else { return }
+        guard showsReading else { return }
 
         NSGraphicsContext.saveGraphicsState()
         trackPath.addClip()
@@ -107,18 +126,20 @@ final class ComparisonBarView: NSView {
         ).fill()
         NSGraphicsContext.restoreGraphicsState()
 
-        let markerWidth: CGFloat = 3
         let rawMarkerX = trackRect.minX + trackRect.width * timeFraction
         let markerX = max(
             trackRect.minX,
-            min(trackRect.maxX - markerWidth, rawMarkerX - markerWidth / 2)
+            min(
+                trackRect.maxX - Layout.markerWidth,
+                rawMarkerX - Layout.markerWidth / 2
+            )
         )
-        NSColor.white.withAlphaComponent(0.95).setFill()
+        NSColor.controlBackgroundColor.withAlphaComponent(0.98).setFill()
         NSBezierPath(
             roundedRect: NSRect(
                 x: markerX,
                 y: trackRect.minY - 2,
-                width: markerWidth,
+                width: Layout.markerWidth,
                 height: trackRect.height + 4
             ),
             xRadius: 1.5,
@@ -131,21 +152,16 @@ final class ComparisonBarView: NSView {
         needsDisplay = true
     }
 
-    func update(
-        timePercent: Int,
-        timeFraction: Double,
-        usagePercent: Int,
-        usageFraction: Double,
-        color: NSColor
-    ) {
-        self.timeFraction = timeFraction.clampedToUnitInterval
-        self.usageFraction = usageFraction.clampedToUnitInterval
+    func update(reading: UsageReading, color: NSColor) {
+        timeFraction = reading.timeRemainingFraction.clamped(to: 0...1)
+        usageFraction = reading.usageRemainingFraction.clamped(to: 0...1)
         usageColor = color
-        isAvailable = true
-        timeValue.stringValue = "\(timePercent)%"
-        usageValue.stringValue = "\(usagePercent)%"
+        showsReading = true
+        timeValue.stringValue = "\(reading.timeRemainingPercent)%"
+        usageValue.stringValue = "\(reading.usageRemainingPercent)%"
         setAccessibilityValue(
-            "Time remaining \(timePercent) percent, usage remaining \(usagePercent) percent"
+            "Usage remaining \(reading.usageRemainingPercent) percent; "
+                + "time remaining \(reading.timeRemainingPercent) percent"
         )
         needsLayout = true
         needsDisplay = true
@@ -155,7 +171,7 @@ final class ComparisonBarView: NSView {
         timeFraction = 0
         usageFraction = 0
         usageColor = .systemGray
-        isAvailable = false
+        showsReading = false
         timeValue.stringValue = "—"
         usageValue.stringValue = "—"
         setAccessibilityValue("Usage unavailable")
@@ -167,44 +183,44 @@ final class ComparisonBarView: NSView {
         name: NSTextField,
         value: NSTextField,
         fraction: Double,
-        y: CGFloat,
-        rowHeight: CGFloat
-    ) {
+        namePlacement: NamePlacement,
+        y: CGFloat
+    ) -> NamePlacement {
         name.sizeToFit()
         value.sizeToFit()
 
         let valueWidth = value.frame.width
         let markerCenter = bounds.minX + bounds.width * fraction
-        let valueX = max(
-            bounds.minX,
-            min(bounds.maxX - valueWidth, markerCenter - valueWidth / 2)
-        )
-        value.frame = NSRect(x: valueX, y: y, width: valueWidth, height: rowHeight)
-
+        let preferredValueX = markerCenter - valueWidth / 2
         let nameWidth = name.frame.width
-        let gap: CGFloat = 2.5
-        if fraction > 0.5 {
-            name.alignment = .right
-            name.frame = NSRect(
-                x: max(bounds.minX, value.frame.minX - gap - nameWidth),
-                y: y,
-                width: nameWidth,
-                height: rowHeight
-            )
-        } else {
-            name.alignment = .left
-            name.frame = NSRect(
-                x: min(bounds.maxX - nameWidth, value.frame.maxX + gap),
-                y: y,
-                width: nameWidth,
-                height: rowHeight
-            )
-        }
-    }
-}
+        let labelAndValueWidth = nameWidth + Layout.labelGap + valueWidth
+        guard bounds.width >= labelAndValueWidth else { return namePlacement }
 
-extension Double {
-    fileprivate var clampedToUnitInterval: Double {
-        min(1, max(0, self))
+        let resolvedPlacement = namePlacement.updated(for: fraction)
+        let valueX: CGFloat
+        let nameX: CGFloat
+        if resolvedPlacement == .beforeValue {
+            let minimumValueX = bounds.minX + nameWidth + Layout.labelGap
+            let maximumValueX = bounds.maxX - valueWidth
+            valueX = preferredValueX.clamped(to: minimumValueX...maximumValueX)
+            nameX = valueX - Layout.labelGap - nameWidth
+            name.alignment = .right
+        } else {
+            let maximumValueX = bounds.maxX - labelAndValueWidth
+            valueX = preferredValueX.clamped(to: bounds.minX...maximumValueX)
+            nameX = valueX + valueWidth + Layout.labelGap
+            name.alignment = .left
+        }
+
+        value.frame = NSRect(x: valueX, y: y, width: valueWidth, height: Layout.rowHeight)
+        name.frame = NSRect(x: nameX, y: y, width: nameWidth, height: Layout.rowHeight)
+        return resolvedPlacement
+    }
+
+    private var trackColor: NSColor {
+        let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return isDark
+            ? NSColor.white.withAlphaComponent(0.24)
+            : NSColor.black.withAlphaComponent(0.14)
     }
 }

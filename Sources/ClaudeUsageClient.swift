@@ -26,17 +26,22 @@ enum ClaudeUsageClientError: LocalizedError {
 
 struct ClaudeUsageClient: Sendable {
     private let helperURL: URL?
+    private let workspaceURL: URL
     private let executableLocator: ClaudeExecutableLocator
     private let runner: ProcessRunner
     private let parser: UsageTranscriptParser
 
     init(
         helperURL: URL? = Bundle.main.url(forResource: "claude-usage", withExtension: "exp"),
+        workspaceURL: URL = ClaudeUsageWorkspace.defaultURL(),
         executableLocator: ClaudeExecutableLocator = ClaudeExecutableLocator(),
-        runner: ProcessRunner = ProcessRunner(timeout: 60, maximumOutputBytes: 512 * 1024),
+        // The helper's stage deadlines sum to ~85s (20 prompt + 20 usage + 5 capture + 20 close
+        // + 20 exit), so the runner deadline must stay above that to not kill healthy fetches.
+        runner: ProcessRunner = ProcessRunner(timeout: 100, maximumOutputBytes: 512 * 1024),
         parser: UsageTranscriptParser = UsageTranscriptParser()
     ) {
         self.helperURL = helperURL
+        self.workspaceURL = workspaceURL
         self.executableLocator = executableLocator
         self.runner = runner
         self.parser = parser
@@ -61,11 +66,21 @@ struct ClaudeUsageClient: Sendable {
             throw ClaudeUsageClientError.helperNotFound
         }
 
+        do {
+            try prepareWorkspace()
+        } catch {
+            throw ClaudeUsageClientError.launchFailed(
+                "Could not prepare the app's private usage workspace"
+            )
+        }
+
         var environment = ProcessInfo.processInfo.environment
         environment["TERM"] = "xterm-256color"
         // Parsing intentionally targets Claude's English screen-reader labels.
         environment["LANG"] = "en_US.UTF-8"
         environment["LC_ALL"] = "en_US.UTF-8"
+        // expect sources $DOTDIR/.expect.rc before the script; drop it alongside the -n/-N flags.
+        environment["DOTDIR"] = nil
 
         let fileManager = FileManager.default
         let childPIDFileURL = fileManager.temporaryDirectory
@@ -84,8 +99,18 @@ struct ClaudeUsageClient: Sendable {
 
         let command = ProcessCommand(
             executableURL: URL(fileURLWithPath: "/usr/bin/expect"),
-            arguments: [helperURL.path, executableURL.path, childPIDFileURL.path],
-            currentDirectoryURL: FileManager.default.homeDirectoryForCurrentUser,
+            // -n and -N stop expect from sourcing ~/.expect.rc and the system expect.rc
+            // ahead of the helper; -f marks the script argument explicitly.
+            arguments: [
+                "-n",
+                "-N",
+                "-f",
+                helperURL.path,
+                executableURL.path,
+                childPIDFileURL.path,
+                "--trust-controlled-workspace",
+            ],
+            currentDirectoryURL: workspaceURL,
             environment: environment,
             cleanupProcessIDFileURL: childPIDFileURL
         )
@@ -117,8 +142,12 @@ struct ClaudeUsageClient: Sendable {
         }
     }
 
-    private func failureDiagnostic(from transcript: String) -> String {
+    func failureDiagnostic(from transcript: String) -> String {
         TerminalTranscript.plainText(from: transcript)
+            .replacingOccurrences(
+                of: FileManager.default.homeDirectoryForCurrentUser.path,
+                with: "~"
+            )
             .split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
@@ -127,39 +156,85 @@ struct ClaudeUsageClient: Sendable {
             .prefix(240)
             .description
     }
+
+    private func prepareWorkspace(fileManager: FileManager = .default) throws {
+        try fileManager.createDirectory(
+            at: workspaceURL,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        let values = try workspaceURL.resourceValues(forKeys: [
+            .isDirectoryKey,
+            .isSymbolicLinkKey,
+        ])
+        guard values.isDirectory == true, values.isSymbolicLink != true else {
+            throw CocoaError(.fileWriteInvalidFileName)
+        }
+        // createDirectory does not reapply attributes when the directory already exists.
+        try fileManager.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: workspaceURL.path
+        )
+    }
+}
+
+struct ClaudeUsageWorkspace {
+    static func defaultURL(fileManager: FileManager = .default) -> URL {
+        let applicationSupportURL =
+            fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent(
+                "Library/Application Support",
+                isDirectory: true
+            )
+
+        return
+            applicationSupportURL
+            .appendingPathComponent(MenuBarPreferencesStore.suiteName, isDirectory: true)
+            .appendingPathComponent("UsageWorkspace", isDirectory: true)
+    }
 }
 
 struct ClaudeExecutableLocator: Sendable {
     private let environment: [String: String]
     private let homeDirectory: URL
+    private let systemBinDirectories: [String]
 
     init(
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+        systemBinDirectories: [String] = ["/opt/homebrew/bin", "/usr/local/bin"]
     ) {
         self.environment = environment
         self.homeDirectory = homeDirectory
+        self.systemBinDirectories = systemBinDirectories
     }
 
     func find(fileManager: FileManager = .default) -> URL? {
         var candidates = [
             homeDirectory.appendingPathComponent(".local/bin/claude").path,
             homeDirectory.appendingPathComponent(".claude/local/claude").path,
-            "/opt/homebrew/bin/claude",
-            "/usr/local/bin/claude",
         ]
+        candidates.append(contentsOf: systemBinDirectories.map { "\($0)/claude" })
         if let path = environment["PATH"] {
             candidates.append(
-                contentsOf: path.split(separator: ":").map {
-                    URL(fileURLWithPath: String($0)).appendingPathComponent("claude").path
-                })
+                contentsOf: path.split(separator: ":", omittingEmptySubsequences: false)
+                    .map(String.init)
+                    .filter { $0.hasPrefix("/") }
+                    .map {
+                        URL(fileURLWithPath: $0).appendingPathComponent("claude").path
+                    }
+            )
         }
 
         var visited = Set<String>()
         for path in candidates where visited.insert(path).inserted {
-            if fileManager.isExecutableFile(atPath: path) {
-                return URL(fileURLWithPath: path).resolvingSymlinksInPath()
-            }
+            var isDirectory: ObjCBool = false
+            guard
+                fileManager.fileExists(atPath: path, isDirectory: &isDirectory),
+                !isDirectory.boolValue,
+                fileManager.isExecutableFile(atPath: path)
+            else { continue }
+            return URL(fileURLWithPath: path).resolvingSymlinksInPath()
         }
         return nil
     }
@@ -253,22 +328,22 @@ struct ProcessRunner: Sendable {
         }
         try? writeHandle.close()
 
+        var resolvedProcessOwnership = false
+        defer {
+            if !resolvedProcessOwnership {
+                stop(process, cleanupProcessIDFileURL: command.cleanupProcessIDFileURL)
+            }
+        }
+
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: .seconds(timeout))
         var output = Data()
         while process.isRunning {
-            do {
-                try drain(descriptor, into: &output)
-            } catch {
-                stop(process, cleanupProcessIDFileURL: command.cleanupProcessIDFileURL)
-                throw error
-            }
+            try drain(descriptor, into: &output)
             if Task.isCancelled {
-                stop(process, cleanupProcessIDFileURL: command.cleanupProcessIDFileURL)
                 throw CancellationError()
             }
             if clock.now >= deadline {
-                stop(process, cleanupProcessIDFileURL: command.cleanupProcessIDFileURL)
                 throw ProcessRunnerError.timedOut
             }
             Thread.sleep(forTimeInterval: 0.01)
@@ -276,8 +351,13 @@ struct ProcessRunner: Sendable {
         process.waitUntilExit()
         try drain(descriptor, into: &output)
 
+        let terminationStatus = process.terminationStatus
+        if terminationStatus != 0 {
+            stop(process, cleanupProcessIDFileURL: command.cleanupProcessIDFileURL)
+        }
+        resolvedProcessOwnership = true
         return ProcessResult(
-            terminationStatus: process.terminationStatus,
+            terminationStatus: terminationStatus,
             output: String(decoding: output, as: UTF8.self)
         )
     }

@@ -5,35 +5,33 @@ enum AppConfiguration {
         let limit: UsageLimit
         let timeLabel: String
         let usageLabel: String
+        let accessibilityLabel: String
     }
 
-    static let appName = "Claude Usage Micro"
+    static let name = "Claude Usage Micro"
     static let title = "CLAUDE USAGE"
-    static let menuPrefix = "Cd"
-    static let initialToolTip = "Claude weekly usage"
+    static let initialToolTip = "Claude usage"
     static let refreshInterval: TimeInterval = RefreshConfiguration.minutes * 60
+    static let clockRefreshInterval: TimeInterval = 60
     static let contentSize = NSSize(width: 320, height: 312)
-    static let statusLimit: UsageLimit = .allModels
     static let rows = [
         Row(
             limit: .session,
-            timeLabel: "Session Time Remaining",
-            usageLabel: "Session usage remaining"
+            timeLabel: "Session time remaining",
+            usageLabel: "Session usage remaining",
+            accessibilityLabel: "Current-session limit"
         ),
         Row(
             limit: .allModels,
             timeLabel: "Week remaining",
-            usageLabel: "All-model usage remaining"
+            usageLabel: "All-model usage remaining",
+            accessibilityLabel: "Weekly all-model limit"
         ),
         Row(
             limit: .fable,
             timeLabel: "Week remaining",
-            usageLabel: "Fable usage remaining"
+            usageLabel: "Fable usage remaining",
+            accessibilityLabel: "Weekly Fable limit"
         ),
     ]
-}
-
-enum RefreshConfiguration {
-    // Developer configuration: adjust this value to change the automatic refresh cadence.
-    static let minutes: TimeInterval = 15
 }

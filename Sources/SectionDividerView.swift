@@ -8,12 +8,8 @@ final class SectionDividerView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let color =
-            isDark
-            ? NSColor.white.withAlphaComponent(0.18)
-            : NSColor.black.withAlphaComponent(0.12)
-        color.setFill()
+
+        dividerColor.setFill()
         NSBezierPath(
             rect: NSRect(
                 x: bounds.minX,
@@ -27,5 +23,12 @@ final class SectionDividerView: NSView {
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         needsDisplay = true
+    }
+
+    private var dividerColor: NSColor {
+        let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return isDark
+            ? NSColor.white.withAlphaComponent(0.18)
+            : NSColor.black.withAlphaComponent(0.12)
     }
 }
